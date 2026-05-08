@@ -1,127 +1,445 @@
 # Overpass Query Executor API
 
-واجهة API بسيطة مبنية بـ FastAPI عشان تساعدك تشتغل مع Overpass QL على خطوتين واضحتين:
+A FastAPI service for working with OpenStreetMap Overpass QL.
 
-1. ترسل استعلام Overpass QL كنص عادي.
-2. تحصل عليه داخل JSON جاهز.
-3. ترسل الـ JSON للتنفيذ وتستقبل نتائج Overpass.
+The API can:
 
-## الفكرة بسرعة
+1. Wrap raw Overpass QL text inside a JSON request body.
+2. Convert escaped Overpass QL JSON back into plain text for Overpass Turbo.
+3. Generate Overpass QL from natural language using either a bounding box or a center point.
+4. Execute raw Overpass QL against the Overpass API and return JSON results.
 
-عندك endpointين مهمين:
+## Quick Start
 
-| Endpoint | ماذا يفعل؟ | هل ينفذ الاستعلام؟ |
-| --- | --- | --- |
-| `POST /overpass/to-json` | يحول نص Overpass QL الخام إلى JSON | لا |
-| `POST /overpass/execute` | يرسل الاستعلام إلى Overpass API ويرجع النتائج | نعم |
-
-يعني الترتيب الطبيعي هو:
-
-```text
-Overpass QL text
-        ↓
-POST /overpass/to-json
-        ↓
-JSON body
-        ↓
-POST /overpass/execute
-        ↓
-Overpass results
-```
-
-## التثبيت
+Install dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## تشغيل المشروع
+Run the app:
 
 ```bash
 python main.py
 ```
 
-بعد التشغيل افتح Swagger UI:
-
-```text
-http://127.0.0.1:9000/docs
-```
-
-تقدر تشغله بـ Uvicorn أيضا:
+Or run with Uvicorn:
 
 ```bash
-uvicorn main:app --reload --host 0.0.0.0 --port 9000
+uvicorn main:app --reload 
 ```
 
-## Endpoint 1: تحويل Overpass QL إلى JSON
-
-Endpoint:
+Open Swagger UI:
 
 ```text
-POST /overpass/to-json
+http://127.0.0.1:8000/docs
 ```
 
-هذه endpoint تستقبل الاستعلام كنص عادي `text/plain`.
+## Endpoints
 
-مهم: هذه endpoint لا تنفذ الاستعلام ولا ترجع أماكن من الخريطة. وظيفتها فقط أنها تلف الاستعلام داخل JSON بالشكل الذي تحتاجه endpoint الثانية.
+| Method | Endpoint | Purpose | Executes Overpass? |
+| --- | --- | --- | --- |
+| `GET` | `/health` | Check API health | No |
+| `POST` | `/overpass/to-json` | Convert plain Overpass QL text to JSON | No |
+| `POST` | `/api/overpass/to-plain-text` | Convert escaped Overpass QL JSON to plain text | No |
+| `POST` | `/api/overpass/generate-query` | Generate Overpass QL from natural language with a `bbox` | No |
+| `POST` | `/api/overpass/generate-query-by-point` | Generate Overpass QL from natural language around `lat/lng` | No |
+| `POST` | `/overpass/execute` | Execute Overpass QL against the Overpass API | Yes |
 
-### طريقة الاستخدام في Swagger
+## Jeddah Coordinates Used In Examples
 
-1. افتح:
+Approximate points:
 
-```text
-http://127.0.0.1:9000/docs
-```
+| Place | Latitude | Longitude |
+| --- | --- | --- |
+| King Abdulaziz University | `21.4935` | `39.2503` |
+| Al-Balad | `21.4858` | `39.1925` |
+| Jeddah Corniche | `21.6117` | `39.1089` |
 
-2. افتح endpoint:
-
-```text
-POST /overpass/to-json
-```
-
-3. اضغط `Try it out`.
-4. تأكد أن نوع الطلب `text/plain`.
-5. الصق استعلام Overpass QL مثل هذا:
-
-```overpassql
-[out:json][timeout:25];
-
-nwr["amenity"="restaurant"](21.45,39.18,21.55,39.28);
-
-out center 25;
-```
-
-### مثال الرد
+Useful Jeddah bounding boxes:
 
 ```json
 {
-  "query": "[out:json][timeout:25];\n\nnwr[\"amenity\"=\"restaurant\"](21.45,39.18,21.55,39.28);\n\nout center 25;"
+  "south": 21.390443,
+  "west": 39.014236,
+  "north": 21.710443,
+  "east": 39.334236
 }
 ```
 
-انسخ هذا الرد واستخدمه في endpoint الثانية.
+```json
+{
+  "south": 21.45,
+  "west": 39.15,
+  "north": 21.55,
+  "east": 39.28
+}
+```
 
-## Endpoint 2: تنفيذ الاستعلام على Overpass
+```json
+{
+  "south": 21.55,
+  "west": 39.10,
+  "north": 21.70,
+  "east": 39.25
+}
 
-Endpoint:
+
+
+```
+
+## 1. Convert Plain Overpass QL To JSON
+
+```text
+POST /overpass/to-json
+```
+
+Use this endpoint when you have raw Overpass QL text and want to wrap it in a JSON body for `/overpass/execute`.
+
+Request content type:
+
+```text
+text/plain
+```
+
+### Example 1: Restaurants in central Jeddah
+
+Request body:
+
+```overpassql
+
+[out:json][timeout:30];
+(
+  node["amenity"="restaurant"](21.45,39.15,21.55,39.28);
+  way["amenity"="restaurant"](21.45,39.15,21.55,39.28);
+  relation["amenity"="restaurant"](21.45,39.15,21.55,39.28);
+);
+
+out center tags;
+
+```
+
+Response:
+
+```json
+{
+  "query": "[out:json][timeout:30];\n(\n  node[\"amenity\"=\"restaurant\"](21.45,39.15,21.55,39.28);\n  way[\"amenity\"=\"restaurant\"](21.45,39.15,21.55,39.28);\n  relation[\"amenity\"=\"restaurant\"](21.45,39.15,21.55,39.28);\n);\n\nout center tags;"
+}
+```
+
+### Example 2: Cafes in north Jeddah
+
+Request body:
+
+```overpassql
+[out:json][timeout:30];
+(
+  node["amenity"="cafe"](21.55,39.10,21.70,39.25);
+  way["amenity"="cafe"](21.55,39.10,21.70,39.25);
+  relation["amenity"="cafe"](21.55,39.10,21.70,39.25);
+);
+
+out center tags;
+```
+
+### Example 3: Pharmacies near Al-Balad
+
+Request body:
+
+```overpassql
+
+[out:json][timeout:30];
+(
+  node["amenity"="pharmacy"](21.47,39.18,21.50,39.21);
+  way["amenity"="pharmacy"](21.47,39.18,21.50,39.21);
+  relation["amenity"="pharmacy"](21.47,39.18,21.50,39.21);
+);
+
+out center tags;
+
+```
+
+## 2. Convert Escaped Overpass QL JSON To Plain Text
+
+```text
+POST /api/overpass/to-plain-text
+```
+
+Use this endpoint when an Overpass QL string is inside JSON and contains escaped characters such as `\n` and `\"`.
+
+Accepted body keys:
+
+- `query`
+- `overpassQL`
+
+Response content type:
+
+```text
+text/plain
+```
+
+### Example 1: Pizza restaurants around King Abdulaziz University
+
+Request body:
+
+```json
+{
+  "overpassQL": "[out:json][timeout:30];\\n(\\n  node[\\\"amenity\\\"~\\\"restaurant|fast_food\\\"][\\\"cuisine\\\"~\\\"pizza\\\", i](around:2000,21.4935,39.2503);\\n  way[\\\"amenity\\\"~\\\"restaurant|fast_food\\\"][\\\"cuisine\\\"~\\\"pizza\\\", i](around:2000,21.4935,39.2503);\\n  relation[\\\"amenity\\\"~\\\"restaurant|fast_food\\\"][\\\"cuisine\\\"~\\\"pizza\\\", i](around:2000,21.4935,39.2503);\\n);\\n\\nout center tags;"
+}
+```
+
+Response:
+
+```overpassql
+
+[out:json][timeout:30];
+(
+  node["amenity"~"restaurant|fast_food"]["cuisine"~"pizza", i](around:2000,21.4935,39.2503);
+  way["amenity"~"restaurant|fast_food"]["cuisine"~"pizza", i](around:2000,21.4935,39.2503);
+  relation["amenity"~"restaurant|fast_food"]["cuisine"~"pizza", i](around:2000,21.4935,39.2503);
+);
+
+out center tags;
+
+```
+
+### Example 2: Cafes around Jeddah Corniche
+
+Request body:
+
+```json
+{
+  "query": "[out:json][timeout:30];\\n(\\n  node[\\\"amenity\\\"=\\\"cafe\\\"](around:1500,21.6117,39.1089);\\n  way[\\\"amenity\\\"=\\\"cafe\\\"](around:1500,21.6117,39.1089);\\n  relation[\\\"amenity\\\"=\\\"cafe\\\"](around:1500,21.6117,39.1089);\\n);\\n\\nout center tags;"
+}
+```
+
+### Example 3: Pharmacies around Al-Balad
+
+Request body:
+
+```json
+{
+  "overpassQL": "[out:json][timeout:30];\\n(\\n  node[\\\"amenity\\\"=\\\"pharmacy\\\"](around:1000,21.4858,39.1925);\\n  way[\\\"amenity\\\"=\\\"pharmacy\\\"](around:1000,21.4858,39.1925);\\n  relation[\\\"amenity\\\"=\\\"pharmacy\\\"](around:1000,21.4858,39.1925);\\n);\\n\\nout center tags;"
+}
+```
+
+## 3. Generate Overpass QL From Natural Language With Bbox
+
+```text
+POST /api/overpass/generate-query
+```
+
+This endpoint does not execute the query. It only returns a ready-to-use Overpass QL string.
+
+Use it when the search area is a bounding box.
+
+### Request shape
+
+```json
+{
+  "query": "pizza restaurants near mosque",
+  "bbox": {
+    "south": 21.390443,
+    "west": 39.014236,
+    "north": 21.710443,
+    "east": 39.334236
+  },
+  "radiusMeters": 500
+}
+```
+
+### Example 1: Pizza restaurants near mosques in Jeddah
+
+```json
+{
+  "query": "pizza restaurants near mosque",
+  "bbox": {
+    "south": 21.390443,
+    "west": 39.014236,
+    "north": 21.710443,
+    "east": 39.334236
+  },
+  "radiusMeters": 500
+}
+```
+
+Meaning:
+
+1. Find mosques inside the bounding box.
+2. Find pizza restaurants within 500 meters of those mosques.
+
+### Example 2: Cafes near universities in central Jeddah
+
+```json
+{
+  "query": "cafes close to university",
+  "bbox": {
+    "south": 21.45,
+    "west": 39.15,
+    "north": 21.55,
+    "east": 39.28
+  },
+  "radiusMeters": 700
+}
+```
+
+### Example 3: Pharmacies beside hospitals
+
+```json
+{
+  "query": "pharmacies beside hospital",
+  "bbox": {
+    "south": 21.45,
+    "west": 39.15,
+    "north": 21.55,
+    "east": 39.28
+  },
+  "radiusMeters": 400
+}
+```
+
+Response shape:
+
+```json
+{
+  "naturalLanguageQuery": "pizza restaurants near mosque",
+  "overpassQL": "[out:json][timeout:30];\n...\nout center tags;",
+  "explanation": "Generated a nearby Overpass query...",
+  "detectedIntent": {
+    "target": "pizza restaurants",
+    "nearbyCondition": "mosques",
+    "radiusMeters": 500,
+    "bbox": "(21.390443,39.014236,21.710443,39.334236)"
+  }
+}
+```
+
+## 5. Generate Overpass QL From Natural Language Around A Point
+
+```text
+POST /api/overpass/generate-query-by-point
+```
+
+Use this endpoint when you have a specific center point, such as King Abdulaziz University, and want to search inside a circular area around it.
+
+### radiusMeters vs nearbyRadiusMeters
+
+`radiusMeters` is the search radius around the given `lat/lng`.
+
+`nearbyRadiusMeters` is used only when the natural language query contains a nearby relationship such as `near`, `beside`, `close to`, or `around`. It controls the distance between the target POI and the anchor POI.
+
+Example:
+
+```json
+{
+  "query": "pizza restaurants near mosque",
+  "lat": 21.4935,
+  "lng": 39.2503,
+  "radiusMeters": 2000,
+  "nearbyRadiusMeters": 500
+}
+```
+
+Meaning:
+
+1. Find mosques within 2000 meters of the center point.
+2. Find pizza restaurants within 500 meters of those mosques.
+
+If the query has no nearby relationship, you can omit `nearbyRadiusMeters`.
+
+### Example 1: Pizza restaurants around King Abdulaziz University
+
+```json
+{
+  "query": "pizza restaurants",
+  "lat": 21.4935,
+  "lng": 39.2503,
+  "radiusMeters": 2000
+}
+```
+
+### Example 2: Pizza restaurants near mosques around King Abdulaziz University
+
+```json
+{
+  "query": "pizza restaurants near mosque",
+  "lat": 21.4935,
+  "lng": 39.2503,
+  "radiusMeters": 2000,
+  "nearbyRadiusMeters": 500
+}
+```
+
+### Example 3: Cafes around Jeddah Corniche
+
+```json
+{
+  "query": "cafes",
+  "lat": 21.6117,
+  "lng": 39.1089,
+  "radiusMeters": 1500
+}
+```
+
+Response shape:
+
+```json
+{
+  "naturalLanguageQuery": "pizza restaurants near mosque",
+  "overpassQL": "[out:json][timeout:30];\n...\nout center tags;",
+  "explanation": "Generated a point-radius Overpass query...",
+  "detectedIntent": {
+    "target": "pizza restaurants",
+    "nearbyCondition": "mosques",
+    "radiusMeters": 2000,
+    "nearbyRadiusMeters": 500,
+    "center": {
+      "lat": 21.4935,
+      "lng": 39.2503
+    }
+  }
+}
+```
+
+## 6. Execute Overpass QL
 
 ```text
 POST /overpass/execute
 ```
 
-هذه endpoint تستقبل JSON يحتوي على المفتاح `query`، ثم ترسل الاستعلام إلى Overpass API الحقيقي وترجع لك النتيجة الخام.
+This is the only endpoint that sends a query to the real Overpass API.
 
-### Request body
+Request content type:
+
+```text
+application/json
+```
+
+### Example 1: Execute restaurants around King Abdulaziz University
 
 ```json
 {
-  "query": "[out:json][timeout:25];\n\nnwr[\"amenity\"=\"restaurant\"](21.45,39.18,21.55,39.28);\n\nout center 25;"
+  "query": "[out:json][timeout:30];\n(\n  node[\"amenity\"=\"restaurant\"](around:2000,21.4935,39.2503);\n  way[\"amenity\"=\"restaurant\"](around:2000,21.4935,39.2503);\n  relation[\"amenity\"=\"restaurant\"](around:2000,21.4935,39.2503);\n);\n\nout center tags;"
 }
 ```
 
-### شكل الرد المتوقع
+### Example 2: Execute cafes in north Jeddah
 
-الرد يرجع من Overpass نفسه، وأهم شيء تبحث عنه هو `elements`.
+```json
+{
+  "query": "[out:json][timeout:30];\n(\n  node[\"amenity\"=\"cafe\"](21.55,39.10,21.70,39.25);\n  way[\"amenity\"=\"cafe\"](21.55,39.10,21.70,39.25);\n  relation[\"amenity\"=\"cafe\"](21.55,39.10,21.70,39.25);\n);\n\nout center tags;"
+}
+```
+
+### Example 3: Execute pharmacies around Al-Balad
+
+```json
+{
+  "query": "[out:json][timeout:30];\n(\n  node[\"amenity\"=\"pharmacy\"](around:1000,21.4858,39.1925);\n  way[\"amenity\"=\"pharmacy\"](around:1000,21.4858,39.1925);\n  relation[\"amenity\"=\"pharmacy\"](around:1000,21.4858,39.1925);\n);\n\nout center tags;"
+}
+```
+
+Expected response shape:
 
 ```json
 {
@@ -131,20 +449,18 @@ POST /overpass/execute
     {
       "type": "node",
       "id": 123456,
-      "lat": 21.51,
-      "lon": 39.24,
+      "lat": 21.4935,
+      "lon": 39.2503,
       "tags": {
         "amenity": "restaurant",
-        "name": "Example name"
+        "name": "Example Restaurant"
       }
     }
   ]
 }
 ```
 
-إذا رجعت `elements` وفيها عناصر، معناته الاستعلام اشتغل ولقى نتائج.
-
-إذا رجعت:
+If `elements` is empty:
 
 ```json
 {
@@ -152,86 +468,77 @@ POST /overpass/execute
 }
 ```
 
-فهذا غالبا يعني أن الـ bounding box صغير، أو أن الوسم `tag` غير موجود في المنطقة المختارة.
+Possible reasons:
 
-## أمثلة Overpass QL جاهزة
+- The selected area has no matching OpenStreetMap data.
+- The radius or bounding box is too small.
+- The tag is not commonly mapped in that area.
 
-هذه الأمثلة مختارة على مناطق ووسوم ترجع نتائج فعلية من Overpass. انتبه فقط أن بيانات OpenStreetMap تتغير مع الوقت، فعدد النتائج وأسماؤها ممكن تختلف.
+## Supported Natural Language Terms
 
-الأمثلة التالية تستخدم `nwr` عشان تجيب:
+The parser maps common Arabic and English terms to OSM tags.
+
+| User term | OSM tags |
+| --- | --- |
+| `mosque` and Arabic mosque terms | `amenity=place_of_worship`, `religion=muslim` |
+| `restaurant`, `restaurants` | `amenity=restaurant` |
+| `fast food` | `amenity=fast_food` |
+| `cafe`, `cafes`, `coffee shop` | `amenity=cafe` |
+| `pharmacy`, `pharmacies` | `amenity=pharmacy` |
+| `hospital`, `hospitals` | `amenity=hospital` |
+| `school`, `schools` | `amenity=school` |
+| `university`, `college` | `amenity=university` |
+| `park`, `garden` | `leisure=park` |
+| `pizza`, `pizzeria` | `cuisine=pizza` |
+
+Nearby relationship terms include:
 
 ```text
-nodes + ways + relations
+near, close to, beside, around, next to, nearby, within
 ```
 
-وتستخدم:
+Arabic nearby terms are also supported by the parser, such as equivalent words for near, beside, and around.
 
-```overpassql
-out center 25;
+## Validation And Errors
+
+### 400 Bad Request
+
+Returned when request input is missing or invalid.
+
+Common cases:
+
+- `query` is missing or empty.
+- `bbox` is missing or invalid.
+- `lat` or `lng` is missing or invalid.
+- `radiusMeters` is not a valid positive integer.
+
+Example:
+
+```json
+{
+  "detail": "query is required and must be a non-empty string."
+}
 ```
 
-عشان ترجع أول 25 نتيجة فقط، ومعها نقطة مركزية للعناصر الكبيرة مثل المباني والطرق.
+### 422 Unprocessable Entity
 
-صيغة الـ bounding box هي:
+Returned when the natural language query cannot be mapped to a valid OSM intent.
 
-```text
-(south, west, north, east)
+```json
+{
+  "error": "Unable to detect a valid OSM intent from the natural language query",
+  "suggestion": "Try something like: restaurants near mosque, cafes near university, pharmacies near hospital"
+}
 ```
 
-### 1. مطاعم في جدة
+### 502 Bad Gateway Or 504 Gateway Timeout
 
-```overpassql
-[out:json][timeout:25];
+Returned only by `/overpass/execute` when the upstream Overpass API fails, returns non-JSON data, or times out.
 
-nwr["amenity"="restaurant"](21.45,39.18,21.55,39.28);
+## Notes
 
-out center 25;
-```
-
-### 2. كافيهات في جدة
-
-```overpassql
-[out:json][timeout:25];
-
-nwr["amenity"="cafe"](21.45,39.18,21.55,39.28);
-
-out center 25;
-```
-
-### 3. فنادق في وسط جدة
-
-```overpassql
-[out:json][timeout:25];
-
-nwr["tourism"="hotel"](21.48,39.15,21.62,39.25);
-
-out center 25;
-```
-
-### 4. محطات وقود في مكة
-
-```overpassql
-[out:json][timeout:25];
-
-nwr["amenity"="fuel"](21.36,39.79,21.46,39.90);
-
-out center 25;
-```
-
-### 5. صيدليات في شمال جدة
-
-```overpassql
-[out:json][timeout:25];
-
-nwr["amenity"="pharmacy"](21.55,39.12,21.70,39.25);
-
-out center 25;
-```
-
-## ملاحظات مهمة
-
-- استخدم `/overpass/to-json` عندما يكون عندك استعلام Overpass QL كنص وتبغى تحوله إلى JSON.
-- استخدم `/overpass/execute` عندما تبغى تنفذ الاستعلام وترجع نتائج من Overpass.
-- لو الاستعلام بطيء أو رجع timeout، صغر الـ bounding box أو قلل عدد النتائج.
-- لو ما رجعت نتائج، جرب وسم مختلف مثل `amenity`, `tourism`, أو `shop`.
-- وجود `[out:json]` مهم لأن التطبيق يتوقع أن Overpass يرجع JSON.
+- Generator endpoints do not execute queries. They only generate Overpass QL.
+- Use `/api/overpass/to-plain-text` when you want to copy generated Overpass QL into Overpass Turbo without escaped `\n` and `\"`.
+- `radiusMeters` defaults to `500` and is capped at `5000`.
+- `nearbyRadiusMeters` is optional and only applies to point-based nearby relationship queries.
+- OpenStreetMap data changes over time, so result counts can change.

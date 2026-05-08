@@ -47,6 +47,18 @@ http://127.0.0.1:8000/docs
 | `POST` | `/api/overpass/generate-query-by-point` | Generate Overpass QL from natural language around `lat/lng` | No |
 | `POST` | `/overpass/execute` | Execute Overpass QL against the Overpass API | Yes |
 
+## Main Goal
+
+The final production goal of this API is the execution endpoint:
+
+```text
+POST /overpass/execute
+```
+
+This endpoint receives a valid Overpass QL query, sends it to the Overpass API, and returns the real OpenStreetMap results.
+
+The other endpoints are helper endpoints added to make development and testing faster. They let you generate, convert, copy, and test Overpass QL in a few seconds without manually writing every query or manually escaping JSON strings.
+
 ## Jeddah Coordinates Used In Examples
 
 Approximate points:
@@ -499,6 +511,57 @@ near, close to, beside, around, next to, nearby, within
 ```
 
 Arabic nearby terms are also supported by the parser, such as equivalent words for near, beside, and around.
+
+## Natural Language Generator Limitations
+
+The current natural-language-to-Overpass endpoints are intentionally simple helper tools. They use a deterministic mapping layer for common POI words, nearby relationships, cuisine filters, `bbox`, and point-radius searches.
+
+They are useful for quick experiments such as:
+
+- `pizza restaurants near mosque`
+- `cafes close to university`
+- `pharmacies beside hospital`
+
+Very complex natural language queries will usually not be translated correctly by the current generator endpoints. This is expected.
+
+In the larger project, an LLM will be used to generate more accurate Overpass QL for complex user requests. The current generator endpoints exist mainly for fast testing, prototyping, and validating the API flow.
+
+Example of a query that is too complex for the current deterministic generator:
+
+```text
+I want restaurants in Al Naseem district that serve fried meals, but exclude AlBaik restaurants. The restaurant must be next to both a mosque and a cafe, so I can pray and drink coffee after lunch.
+```
+
+This request contains multiple constraints, exclusions, a named district, cuisine/food-style interpretation, and multiple nearby anchors. It should be handled by a more advanced LLM-based query generation layer instead of the simple helper parser.
+
+Try this very complex query with /overpass/execute: 
+```
+[out:json][timeout:90];
+
+area["name"~"Al Naseem|An Naseem|النسيم", i]->.searchArea;
+
+(
+  node["amenity"="place_of_worship"]["religion"="muslim"](area.searchArea)(21.390443,39.014236,21.710443,39.334236);
+  way["amenity"="place_of_worship"]["religion"="muslim"](area.searchArea)(21.390443,39.014236,21.710443,39.334236);
+  relation["amenity"="place_of_worship"]["religion"="muslim"](area.searchArea)(21.390443,39.014236,21.710443,39.334236);
+)->.mosques;
+
+(
+  node["amenity"="cafe"](area.searchArea)(21.390443,39.014236,21.710443,39.334236);
+  way["amenity"="cafe"](area.searchArea)(21.390443,39.014236,21.710443,39.334236);
+  relation["amenity"="cafe"](area.searchArea)(21.390443,39.014236,21.710443,39.334236);
+)->.cafes;
+
+(
+  node["amenity"~"restaurant|fast_food"]["cuisine"~"fried_chicken|chicken|broasted|grill|burger", i]["name"!~"Al.?Baik|ALBAIK|البيك", i]["brand"!~"Al.?Baik|ALBAIK|البيك", i](area.searchArea)(21.390443,39.014236,21.710443,39.334236)(around.mosques:300)(around.cafes:300);
+  way["amenity"~"restaurant|fast_food"]["cuisine"~"fried_chicken|chicken|broasted|grill|burger", i]["name"!~"Al.?Baik|ALBAIK|البيك", i]["brand"!~"Al.?Baik|ALBAIK|البيك", i](area.searchArea)(21.390443,39.014236,21.710443,39.334236)(around.mosques:300)(around.cafes:300);
+  relation["amenity"~"restaurant|fast_food"]["cuisine"~"fried_chicken|chicken|broasted|grill|burger", i]["name"!~"Al.?Baik|ALBAIK|البيك", i]["brand"!~"Al.?Baik|ALBAIK|البيك", i](area.searchArea)(21.390443,39.014236,21.710443,39.334236)(around.mosques:300)(around.cafes:300);
+);
+
+out center tags;
+```
+But remember to use /overpass/to-json before use it :) 
+
 
 ## Validation And Errors
 
